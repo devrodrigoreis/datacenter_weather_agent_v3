@@ -1,0 +1,23 @@
+model:
+  name: "google/gemma-3-270m-it"  # I've finetuned this model for security classifier
+  num_labels: 2
+  dropout: 0.1
+  max_length: 512
+
+intent_model:
+  name: "distilbert-base-uncased"  # I've finetuned this lighter model for intent classification
+  num_labels: 2
+  dropout: 0.1
+  max_length: 128
+
+training:
+  num_epochs: 10
+  batch_size: 16
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_steps: 100
+  gradient_accumulation_steps: 2
+  fp16: true
+
+inference:
+  threshold: 0.5
