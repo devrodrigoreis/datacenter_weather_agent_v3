@@ -1,17 +1,310 @@
-# Architecture
+# Architecture v3
 ## System Design Philosophy
 
-This project demonstrates **the LangGraph multi-agent supervisor pattern** following 2026 best practices for building secure, stateful, and maintainable AI systems.
+This project demonstrates **the LangGraph multi-agent supervisor pattern** with **three-tier memory architecture** and **fine-tuned ML classifiers**, following 2026 best practices for building secure, stateful, cost-efficient, and maintainable AI systems.
 
 ### Design Principles
 
 1. **Security First**: Multi-layer threat detection with adaptive learning from violations
-2. **Separation of Concerns**: Each agent has a single, well-defined responsibility
-3. **Explicit Over Implicit**: All state, routing decisions, and agent interactions are explicit
-4. **Adaptive Intelligence**: System learns from security violations to improve detection
-5. **Fail-Safe**: Multi-layer error handling with graceful degradation
-6. **Observable**: Comprehensive logging, tracing, and security violation tracking
-7. **Extensible**: Clear patterns for adding agents, tools, or capabilities
+2. **Cost Efficiency**: Fine-tuned classifiers (Gemma 3 270M + DistilBERT) eliminate LLM API calls
+3. **Memory-Aware**: Three-tier memory system (context, persistence, semantic RAG)
+4. **Separation of Concerns**: Each agent has a single, well-defined responsibility
+5. **Explicit Over Implicit**: All state, routing decisions, and agent interactions are explicit
+6. **Adaptive Intelligence**: System learns from security violations and query patterns
+7. **Fail-Safe**: Multi-layer error handling with graceful degradation
+8. **Observable**: Comprehensive logging, tracing, and security violation tracking
+9. **Extensible**: Clear patterns for adding agents, tools, or capabilities
+
+### Technology Stack
+
+**Runtime**:
+- Python 3.13.3 (recommended, onnxruntime support)
+- PyTorch 2.10.0 (MPS/CUDA support)
+- transformers 5.0.0
+
+**LLM Integration**:
+- Google Gemini (gemini-3-pro-preview) - answer generation
+- LongCat fallback - rate limit protection
+
+**Fine-Tuned Models** (local inference, no API costs):
+- Gemma 3 270M-it (268,303,938 params) - security classification
+- DistilBERT base (66,658,946 params) - intent classification
+
+**Memory Systems**:
+- Tier 1: Context compression (28K token limit)
+- Tier 2: SQLite persistence (agent_memory.db)
+- Tier 3: ChromaDB 1.4.1 + sentence-transformers 5.2.2 (RAG)
+
+---
+
+## Three-Tier Memory Architecture
+
+### Tier 1: Context Management
+
+**File**: `src/memory/context_manager.py`
+
+**Purpose**: Prevent token overflow in LLM context windows
+
+**Implementation**:
+```python
+class ContextManager:
+    def __init__(self, max_tokens=28000, max_messages=10, summarize_threshold=20000):
+        self.max_tokens = max_tokens
+        self.max_messages = max_messages
+        self.summarize_threshold = summarize_threshold
+    
+    def compress_if_needed(self, state: Dict) -> Dict:
+        """Compress context when approaching token limit"""
+        current_tokens = self.count_tokens(state['messages'])
+        
+        if current_tokens > self.summarize_threshold:
+            # Summarize old messages
+            summary = self._summarize_messages(state['messages'][:-5])
+            state['conversation_summary'] = summary
+            state['messages'] = state['messages'][-5:]  # Keep last 5
+        
+        return state
+```
+
+**Features**:
+- Token counting per message
+- Automatic compression when threshold exceeded
+- Message deduplication
+- Tool result caching
+- Compression history tracking
+
+### Tier 2: Persistent Memory
+
+**File**: `src/memory/agent_memory.py`
+
+**Purpose**: SQLite-based storage for agent decisions and learned patterns
+
+**Schema**:
+```sql
+-- Interactions table
+CREATE TABLE interactions (
+    id INTEGER PRIMARY KEY,
+    timestamp TEXT,
+    query TEXT,
+    answer TEXT,
+    agents TEXT,  -- JSON array
+    success BOOLEAN,
+    time_ms INTEGER,
+    security_blocked BOOLEAN,
+    intent_rejected BOOLEAN
+);
+
+-- Agent decisions table
+CREATE TABLE agent_decisions (
+    id INTEGER PRIMARY KEY,
+    interaction_id INTEGER,
+    agent_name TEXT,
+    decision TEXT,
+    reasoning TEXT,
+    timestamp TEXT
+);
+
+-- Learned patterns table
+CREATE TABLE learned_patterns (
+    id INTEGER PRIMARY KEY,
+    pattern_type TEXT,
+    pattern_text TEXT,
+    frequency INTEGER,
+    last_seen TEXT,
+    metadata TEXT  -- JSON
+);
+```
+
+**Usage**:
+```python
+memory_store = AgentMemoryStore()
+
+# Log interaction
+interaction_id = memory_store.log_interaction(
+    query="What is the weather?",
+    answer="Temperature is 20°C",
+    agents=["SecurityAgent", "IntentAgent", "WeatherAgent"],
+    success=True,
+    time_ms=5234
+)
+
+# Log agent decision
+memory_store.log_agent_decision(
+    interaction_id=interaction_id,
+    agent_name="SecurityAgent",
+    decision="ALLOW",
+    reasoning="No threats detected"
+)
+
+# Learn pattern
+memory_store.learn_pattern(
+    pattern_type="weather_query",
+    pattern_text="forecast",
+    metadata={"confidence": 0.95}
+)
+```
+
+### Tier 3: RAG Semantic Search
+
+**File**: `src/memory/rag_memory.py`
+
+**Purpose**: Vector-based semantic search for similar queries and threats
+
+**Implementation**:
+```python
+class RAGMemorySystem:
+    def __init__(self):
+        self.client = chromadb.Client()
+        self.collection = self.client.create_collection(
+            name="agent_memory",
+            embedding_function=SentenceTransformerEmbeddingFunction(
+                model_name="all-MiniLM-L6-v2"
+            )
+        )
+    
+    def retrieve_similar_threats(self, query: str, top_k=3, min_similarity=0.7):
+        """Find similar past security threats"""
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=top_k,
+            where={"type": "security_threat"}
+        )
+        return self._filter_by_similarity(results, min_similarity)
+```
+
+**Collections**:
+- Interactions: All user queries with full context
+- Security threats: Blocked malicious queries
+- Weather queries: Successful weather-related queries
+
+**Embedding Model**: all-MiniLM-L6-v2 (384 dimensions)
+
+**Use Cases**:
+- Find similar past threats for enhanced detection
+- Retrieve relevant context from previous queries
+- Pattern recognition across interactions
+
+---
+
+## Fine-Tuned ML Classifiers
+
+### Security Classifier Architecture
+
+**File**: `src/inference/security_checker.py`
+
+**Model**: Gemma 3 270M-it (google/gemma-3-270m-it)
+- Parameters: 268,303,938
+- Type: Instruction-tuned causal language model
+- Access: Gated (requires HuggingFace authentication)
+
+**Training**:
+```bash
+python3 -m src.training.train
+```
+
+**Inference**:
+```python
+class SecurityInferenceEngine:
+    def check_prompt(self, prompt: str) -> dict:
+        """Classify prompt as safe/malicious"""
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        outputs = self.model(**inputs)
+        
+        logits = outputs.logits
+        probs = torch.softmax(logits, dim=-1)
+        
+        return {
+            "is_malicious": probs[0][1] > self.threshold,
+            "malicious_probability": float(probs[0][1]),
+            "risk_level": self._map_to_risk_level(probs[0][1])
+        }
+```
+
+**Threat Categories**:
+- prompt_extraction
+- credential_extraction  
+- role_manipulation
+- security_bypass
+- config_inspection
+
+**Benefits**:
+- No LLM API costs for security checks
+- ~500 tokens saved per query
+- Faster inference (local)
+- Consistent classification
+
+### Intent Classifier Architecture
+
+**File**: `src/inference/intent_checker.py`
+
+**Model**: DistilBERT base uncased
+- Parameters: 66,658,946
+- Type: Distilled BERT for sequence classification
+
+**Training**:
+```bash
+python3 -m src.training.train_intent
+```
+
+**Inference**:
+```python
+class IntentInferenceEngine:
+    def check_intent(self, text: str) -> dict:
+        """Classify if text is weather/location related"""
+        inputs = self.tokenizer(text, return_tensors="pt")
+        outputs = self.model(**inputs)
+        
+        probs = torch.softmax(outputs.logits, dim=-1)
+        
+        return {
+            "is_weather_location": probs[0][1] > self.threshold,
+            "confidence": float(probs[0][1]),
+            "category": "WEATHER/LOCATION" if probs[0][1] > self.threshold else "OFF-TOPIC"
+        }
+```
+
+**Benefits**:
+- No LLM API costs for intent classification
+- ~300 tokens saved per query
+- Fast classification (<100ms)
+
+### Training Pipeline
+
+**File**: `src/training/train.py`
+
+**Features**:
+- PyTorch 2.10.0 + transformers 5.0.0
+- MPS (Apple Silicon) and CUDA support
+- Mixed precision training (fp16 on CUDA)
+- Gradient accumulation
+- Learning rate warmup
+- Automatic checkpointing
+
+**Configuration** (`config.yaml`):
+```yaml
+model:
+  name: "google/gemma-3-270m-it"
+  num_labels: 2
+  dropout: 0.1
+  max_length: 512
+
+training:
+  num_epochs: 10
+  batch_size: 16
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_steps: 100
+  gradient_accumulation_steps: 2
+  fp16: true
+```
+
+**Data Loader**: `src/data.py`
+```python
+class DataLoaderFactory:
+    def create_dataloaders(self, train_data, val_data, test_data):
+        # Tokenize and batch
+        # Return PyTorch DataLoaders
+```
 
 ---
 
@@ -248,11 +541,65 @@ class SpecializedAgent:
 ### Security Agent Architecture
 
 **Responsibilities**:
-- Analyze input for malicious intent
+- Analyze input for malicious intent using fine-tuned Gemma 3 270M
 - Detect prompt injection, credential extraction, role manipulation
 - Log security violations
 - Update threat intelligence in real-time
-- Use learned patterns to enhance detection
+- Use RAG to detect similar past threats
+
+**Implementation**:
+```python
+class SecurityAgent:
+    def __init__(self, llm, memory_store, rag_memory):
+        self.llm = llm  # Fallback only
+        self.memory_store = memory_store  # Tier 2
+        self.rag_memory = rag_memory  # Tier 3
+        
+        # Load fine-tuned classifier (Tier 0: ML inference)
+        self.security_classifier = SecurityInferenceEngine(
+            model_path="models/checkpoints/best_model.pt",
+            config_path="config.yaml"
+        )
+    
+    async def analyze(self, state: SharedState) -> SharedState:
+        # 1. Check RAG for similar past threats (Tier 3)
+        similar_threats = self.rag_memory.retrieve_similar_threats(
+            state['question'], top_k=3, min_similarity=0.7
+        )
+        
+        # 2. Use fine-tuned classifier (NO LLM CREDITS)
+        security_result = self.security_classifier.check_prompt(state['question'])
+        
+        is_threat = security_result['is_malicious']
+        
+        # 3. If RAG found very similar threats, override
+        if similar_threats:
+            highest_sim = max(t['similarity'] for t in similar_threats)
+            if highest_sim > 0.85:
+                is_threat = True
+        
+        if is_threat:
+            threat_type = self._map_risk_to_threat_type(security_result['risk_level'])
+            
+            # Log to file and Tier 2 memory
+            self._log_violation(state['question'], threat_type)
+            self.memory_store.log_agent_decision(
+                interaction_id=state['interaction_id'],
+                agent_name=self.name,
+                decision="BLOCK",
+                reasoning=f"Threat: {threat_type}"
+            )
+            
+            # Add to RAG (Tier 3)
+            self.rag_memory.add_security_threat(
+                threat_query=state['question'],
+                threat_type=threat_type
+            )
+            
+            return threat_detected_state
+        
+        return safe_state
+```
 
 **Threat Categories**:
 1. **prompt_extraction**: Attempts to extract system prompts or instructions
@@ -261,29 +608,10 @@ class SpecializedAgent:
 4. **security_bypass**: Attempts to bypass security or ignore instructions
 5. **config_inspection**: Attempts to inspect internal files or configuration
 
-**Adaptive Learning Flow**:
-```python
-class SecurityAgent:
-    async def analyze(self, state: SharedState) -> SharedState:
-        # 1. Load learned patterns from insights.json
-        self.learned_patterns = self._load_insights()
-        
-        # 2. Generate adaptive prompt with learned patterns
-        prompt = self._generate_adaptive_prompt()  # Includes threat distribution
-        
-        # 3. Analyze query with LLM
-        response = await self.llm.ainvoke([prompt, user_query])
-        
-        # 4. If threat detected, classify and log
-        if is_threat:
-            threat_type = await self._classify_threat(query)
-            self._log_violation(query, threat_type)
-            self._update_insights_from_logs()  # Update immediately
-            
-            return threat_detected_state
-        
-        return safe_state
-```
+**Cost Savings**:
+- Old approach: ~500 tokens per security check × Gemini API cost
+- New approach: Local inference, zero API costs
+- **Savings**: 100% of security classification costs
 
 **Security Logging**:
 - **violations_YYYYMMDD.jsonl**: Daily log of all security violations
@@ -312,22 +640,54 @@ class SecurityAgent:
 ### Intent Agent Architecture
 
 **Responsibilities**:
-- Classify if query is weather/location related
+- Classify if query is weather/location related using fine-tuned DistilBERT
 - Reject off-topic questions
 - Ensure agent stays within defined scope
+- Use RAG to find similar past queries
 
-**Classification Logic**:
+**Implementation**:
 ```python
 class IntentAgent:
-    async def classify(self, state: SharedState) -> SharedState:
-        # LLM determines if query is about weather or location
-        response = await self.llm.ainvoke([classification_prompt, query])
+    def __init__(self, llm, memory_store, rag_memory):
+        self.llm = llm  # Fallback only
+        self.memory_store = memory_store
+        self.rag_memory = rag_memory
         
-        is_weather = "YES" in response.content.upper()
+        # Load fine-tuned classifier
+        self.intent_classifier = IntentInferenceEngine(
+            model_path="models/intent_checkpoints/best_intent_model.pt",
+            config_path="config.yaml"
+        )
+    
+    async def classify(self, state: SharedState) -> SharedState:
+        # 1. Check RAG for similar weather queries (Tier 3)
+        similar_queries = self.rag_memory.retrieve_similar_weather_queries(
+            state['question'], top_k=3, min_similarity=0.6
+        )
+        
+        # 2. Use fine-tuned classifier (NO LLM CREDITS)
+        intent_result = self.intent_classifier.check_intent(state['question'])
+        
+        is_weather_question = intent_result['is_weather_location']
+        
+        # 3. Log to memory (Tier 2)
+        self.memory_store.log_agent_decision(
+            interaction_id=state['interaction_id'],
+            agent_name=self.name,
+            decision="WEATHER/LOCATION" if is_weather_question else "OFF-TOPIC",
+            reasoning=f"{intent_result['category']} (confidence: {intent_result['confidence']:.2%})"
+        )
+        
+        # 4. Add to RAG if weather query (Tier 3)
+        if is_weather_question:
+            self.rag_memory.add_weather_query(
+                query=state['question'],
+                metadata={"confidence": intent_result['confidence']}
+            )
         
         return {
             **state,
-            "is_weather_question": is_weather,
+            "is_weather_question": is_weather_question,
             "next_agent": "supervisor"
         }
 ```
@@ -337,6 +697,11 @@ class IntentAgent:
 - Location questions: ALLOWED
 - General knowledge: REJECTED
 - Unrelated topics: REJECTED
+
+**Cost Savings**:
+- Old approach: ~300 tokens per intent check × Gemini API cost
+- New approach: Local inference, zero API costs
+- **Savings**: 100% of intent classification costs
 
 ---
 

@@ -25,7 +25,7 @@ src/training/
 .installed.cfg
 *.egg
 *.bak
-.hlp
+*.hlp
 # Virtual Environment
 venv/
 env/

@@ -1,22 +1,58 @@
-# Data Center Weather Agent
+# Data Center Weather Agent v3
 
 A production-grade multi-agent LangGraph system that provides secure, intelligent weather forecasting for data center locations using the Model Context Protocol (MCP).
 
-**Architecture**: LangGraph Multi-Agent Supervisor Pattern with specialized agents for security, intent classification, location discovery, weather retrieval, output validation, and adaptive learning.
+**Architecture**: LangGraph Multi-Agent Supervisor Pattern with 7 specialized agents, 3-tier memory system, and fine-tuned ML classifiers for cost-efficient inference.
+
+**Key Features**:
+- 🤖 **Fine-Tuned Classifiers**: Gemma 3 270M (security) + DistilBERT (intent) - saves LLM credits
+- 🧠 **Three-Tier Memory**: Context Management + SQLite Persistence + RAG Semantic Search
+- 🔒 **Multi-Layer Security**: Real-time threat detection with adaptive learning
+- ⚡ **Production Ready**: Python 3.13, MPS/CUDA support, graceful error handling
 
 ## Overview
 
 This system securely answers: *"What is the weather forecast of the data center?"*
 
-It features a multi-layered security and processing pipeline:
+### Core Architecture
 
-1. **Security Agent**: Analyzes queries for malicious intent, prompt injection, and security threats
-2. **Intent Agent**: Validates queries are weather/location related, rejects off-topic requests
-3. **IP Agent**: Discovers data center's public IP address and geographic coordinates
+**7 Specialized Agents**:
+1. **Security Agent**: Fine-tuned Gemma 3 270M classifier (268M params) - detects threats without LLM credits
+2. **Intent Agent**: Fine-tuned DistilBERT classifier (66M params) - validates topic relevance
+3. **IP Agent**: Discovers data center's public IP and geographic coordinates
 4. **Weather Agent**: Retrieves current weather forecast data
 5. **Safety Agent**: Validates output doesn't leak sensitive system information
 6. **Learning Agent**: Analyzes security violations and adapts threat detection
 7. **Supervisor Agent**: Orchestrates workflow and makes routing decisions
+
+**3-Tier Memory System**:
+- **Tier 1**: Context Management - Token tracking, compression, deduplication (28K limit)
+- **Tier 2**: Persistent Memory - SQLite for agent decisions, patterns, query history
+- **Tier 3**: RAG Semantic Search - ChromaDB + sentence-transformers for semantic retrieval
+
+### Machine Learning Components
+
+**Fine-Tuned Security Classifier**:
+- Model: Gemma 3 270M-it (google/gemma-3-270m-it)
+- Purpose: Detect prompt injection, credential extraction, role manipulation
+- Training: PyTorch 2.10.0, transformers 5.0.0, MPS/CUDA support
+- Inference: Local on-device, no API costs
+- Location: `models/checkpoints/best_model.pt`
+
+**Fine-Tuned Intent Classifier**:
+- Model: DistilBERT base uncased
+- Purpose: Classify weather/location vs off-topic queries
+- Inference: Local on-device, no API costs
+- Location: `models/intent_checkpoints/best_intent_model.pt`
+
+**Training Pipeline**:
+```bash
+# Train security classifier
+python3 -m src.training.train
+
+# Train intent classifier
+python3 -m src.training.train_intent
+```
 
 ### Why LangGraph Multi-Agent Supervisor Architecture?
 
@@ -256,28 +292,58 @@ async def route(self, state: SharedState) -> SharedState:
 
 ### Prerequisites
 
-- Python 3.10 or higher
-- Fully tested on the version 3.14.2
+- **Python 3.13** (recommended) - onnxruntime requires ≤3.13 for RAG features
+- Python 3.14 not supported (onnxruntime incompatibility)
 - Google Gemini API key (free tier available)
 - Optional: LongCat API key (fallback)
+- HuggingFace account (for downloading gated Gemma 3 model)
+
+**Hardware**:
+- 4GB+ RAM for model inference
+- MPS (Apple Silicon) or CUDA GPU recommended for training
+- 2GB disk space for models and dependencies
 
 ### Installation
 
-1. **Clone or Download** this project
-
-2. **Install Dependencies**:
+1. **Clone Repository**:
    ```bash
-   pip install -r requirements.txt
+   git clone https://github.com/devrodrigoreis/datacenter_weather_agent_v3.git
+   cd datacenter_weather_agent_v3
    ```
 
-3. **Configure API Keys**:
+2. **Create Virtual Environment** (Python 3.13):
+   ```bash
+   python3.13 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   ```
+
+3. **Install Dependencies**:
+   ```bash
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
    
-   Copy the example environment file:
+   Key dependencies:
+   - PyTorch 2.10.0
+   - transformers 5.0.0
+   - chromadb 1.4.1 (RAG)
+   - onnxruntime 1.23.2 (required for ChromaDB)
+   - sentence-transformers 5.2.2 (embeddings)
+   - langgraph, langchain, mcp
+
+4. **Authenticate with HuggingFace** (for Gemma 3 model):
+   ```bash
+   pip install huggingface_hub
+   huggingface-cli login
+   ```
+   Enter your HuggingFace token (get it from https://huggingface.co/settings/tokens)
+
+5. **Configure API Keys**:
    ```bash
    cp .env.example .env
    ```
    
-   Edit `.env` and add your API keys:
+   Edit `.env`:
    ```bash
    GOOGLE_API_KEY=your_gemini_api_key_here
    LONGCAT_API_KEY=your_longcat_api_key_here  # Optional
@@ -285,7 +351,14 @@ async def route(self, state: SharedState) -> SharedState:
    
    Get API keys:
    - Gemini: https://ai.google.dev/
-   - LongCat: https://longcat.chat/ (optional fallback)
+   - LongCat: https://longcat.chat/ (optional)
+
+6. **Download Pre-trained Models** (if not training from scratch):
+   ```bash
+   # Models should be in:
+   # models/checkpoints/best_model.pt          (security classifier)
+   # models/intent_checkpoints/best_intent_model.pt (intent classifier)
+   ```
 
 ## Usage
 
@@ -309,6 +382,53 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 **Terminal 2 - Run Agent**:
 ```bash
 python3 -m agent.main
+```
+
+Expected output:
+```
+============================================================
+Data Center Weather Agent (Multi-Agent System v2)
+With Context Management
+============================================================
+
+✓ Connected to MCP Server
+[OK] LLM configured with fallback: Gemini -> LongCat
+[OK] Context manager initialized (max: 28K tokens, threshold: 20K)
+[OK] Memory store initialized (SQLite database)
+[Initializing RAG memory system...]
+[OK] RAG memory initialized (0 documents)
+  [Loading fine-tuned security classifier...]
+  [OK] Fine-tuned classifier loaded - saving LLM credits!
+  [Loading fine-tuned intent classifier...]
+  [OK] Fine-tuned intent classifier loaded - saving LLM credits!
+[OK] Multi-agent system ready
+
+Agents:
+  - Security Agent (input validation)
+  - Intent Agent (topic classification)
+  - IP Agent (location discovery)
+  - Weather Agent (forecast retrieval)
+  - Safety Agent (output validation)
+  - Learning Agent (pattern analysis)
+  - Supervisor (orchestration)
+
+NEW Features (Tier 1):
+  ✓ Context compression (auto)
+  ✓ Token tracking
+  ✓ Message deduplication
+
+NEW Features (Tier 2):
+  ✓ Persistent memory (SQLite)
+  ✓ Agent decision logging
+  ✓ Pattern learning
+  ✓ Query history
+
+NEW Features (Tier 3):
+  ✓ RAG semantic retrieval (ChromaDB)
+  ✓ Similar threat detection
+  ✓ Similar query matching
+  ✓ Vector embeddings (all-MiniLM-L6-v2)
+------------------------------------------------------------
 ```
 
 ### Example Session
@@ -371,20 +491,47 @@ Enter your question: quit
 ## File Structure
 
 ```
-datacenter_weather_agent/
+datacenter_weather_agent_v3/
 ├── server/
 │   ├── main.py              # MCP server with FastMCP
-│   ├── tools.py             # Tool implementations
+│   ├── tools.py             # Tool implementations (ipify, ip_to_geo, weather)
 │   └── __init__.py
 ├── agent/
-│   ├── main.py              # Custom StateGraph agent (~570 lines)
+│   ├── main.py              # Multi-agent system (1427 lines)
 │   ├── client.py            # MCP client wrapper
 │   └── __init__.py
-├── README.md                # This file
-├── ARCHITECTURE.md          # Deep technical documentation
-├── .env.example             # API key template
-├── .env                     # Your API keys (create this)
-└── requirements.txt         # Python dependencies
+├── src/
+│   ├── data.py              # DataLoaderFactory for training
+│   ├── inference/
+│   │   ├── security_checker.py    # Gemma 3 270M inference
+│   │   └── intent_checker.py      # DistilBERT inference
+│   ├── memory/
+│   │   ├── context_manager.py     # Tier 1: Context compression
+│   │   ├── agent_memory.py        # Tier 2: SQLite persistence
+│   │   └── rag_memory.py          # Tier 3: ChromaDB semantic search
+│   ├── model/
+│   │   └── classifier.py          # PromptSecurityClassifier
+│   └── training/
+│       ├── train.py               # Security classifier training
+│       └── train_intent.py        # Intent classifier training
+├── models/
+│   ├── checkpoints/
+│   │   └── best_model.pt          # Trained security classifier
+│   └── intent_checkpoints/
+│       └── best_intent_model.pt   # Trained intent classifier
+├── data/
+│   └── raw/                       # Training datasets
+├── memory/
+│   └── agent_memory.db            # SQLite database (Tier 2)
+├── security_logs/
+│   ├── insights.json              # Threat intelligence
+│   └── violations_YYYYMMDD.jsonl  # Daily violations
+├── config.yaml                    # Model and training config
+├── README.md                      # This file
+├── ARCHITECTURE.md                # Deep technical documentation
+├── .env.example                   # API key template
+├── .env                           # Your API keys (create this)
+└── requirements.txt               # Python dependencies
 ```
 
 ## Key Features
@@ -524,6 +671,82 @@ workflow.add_node("weather", weather_specialist)
 workflow.add_node("location", location_specialist)
 workflow.add_conditional_edges("start", route_to_specialist, {...})
 ```
+
+## Training Fine-Tuned Classifiers
+
+### Why Fine-Tune?
+
+**Cost Savings**: Fine-tuned classifiers eliminate 2 LLM API calls per query:
+- Security check: ~500 tokens saved
+- Intent classification: ~300 tokens saved
+- **Total savings**: ~800 tokens per query = significant cost reduction at scale
+
+**Performance**: Local inference is faster and more reliable than API calls
+
+### Security Classifier Training
+
+```bash
+# Train Gemma 3 270M for security classification
+python3 -m src.training.train
+```
+
+**Configuration** (`config.yaml`):
+```yaml
+model:
+  name: "google/gemma-3-270m-it"
+  num_labels: 2
+  dropout: 0.1
+  max_length: 512
+
+training:
+  num_epochs: 10
+  batch_size: 16
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_steps: 100
+  gradient_accumulation_steps: 2
+  fp16: true  # Mixed precision (CUDA only)
+```
+
+**Training Data** (data/raw/):
+- `merged_train_prompts.json` - Combined dataset (preferred)
+- `hf_train_prompts.json` - HuggingFace dataset
+- `exploit_prompts.json` - Security exploits
+- `train_prompts.json` - Synthetic data
+
+**Output**:
+- `models/checkpoints/best_model.pt` - Best validation checkpoint
+- `models/checkpoints/final_model.pt` - Final model
+- `models/checkpoints/training_history.json` - Metrics
+
+### Intent Classifier Training
+
+```bash
+# Train DistilBERT for intent classification
+python3 -m src.training.train_intent
+```
+
+**Configuration**:
+```yaml
+intent_model:
+  name: "distilbert-base-uncased"
+  num_labels: 2
+  dropout: 0.1
+  max_length: 128
+```
+
+**Output**:
+- `models/intent_checkpoints/best_intent_model.pt`
+
+### Hardware Requirements
+
+- **Apple Silicon (MPS)**: Supported, automatic detection
+- **NVIDIA GPU (CUDA)**: Supported with mixed precision (fp16)
+- **CPU**: Fallback, slower training
+
+**Training Time** (Apple M1 Pro):
+- Security classifier: ~30 minutes (10 epochs, 16 batch size)
+- Intent classifier: ~15 minutes (lighter model)
 
 ## Troubleshooting
 
@@ -697,16 +920,37 @@ Every execution will be traced in LangSmith dashboard.
 
 ## Dependencies
 
-- **httpx**: Async HTTP client
-- **mcp**: Model Context Protocol SDK
+### Core Framework
 - **langgraph**: Graph-based agent framework
 - **langchain**: LLM abstraction layer
 - **langchain-google-genai**: Gemini integration
 - **langchain-openai**: OpenAI-compatible APIs (LongCat)
-- **python-dotenv**: Environment variable management
-- **uvicorn**: ASGI server
+- **mcp**: Model Context Protocol SDK
+- **httpx**: Async HTTP client
 
-See `requirements.txt` for specific versions.
+### Machine Learning
+- **torch**: 2.10.0 - PyTorch deep learning framework
+- **transformers**: 5.0.0 - HuggingFace transformers
+- **accelerate**: 1.12.0 - Training optimization
+- **datasets**: 4.5.0 - Dataset management
+
+### Memory & RAG (Tier 3)
+- **chromadb**: 1.4.1 - Vector database
+- **sentence-transformers**: 5.2.2 - Text embeddings
+- **onnxruntime**: 1.23.2 - Required by ChromaDB
+
+### Utilities
+- **python-dotenv**: Environment variable management
+- **uvicorn**: ASGI server for MCP
+- **pydantic**: Data validation
+- **pydantic-settings**: Settings management
+
+**Python Version Requirements**:
+- Python 3.13 recommended (full RAG support)
+- Python 3.14 NOT supported (onnxruntime incompatibility)
+- Python 3.12 supported
+
+See `requirements.txt` for complete list with pinned versions.
 
 ## Learn More
 
