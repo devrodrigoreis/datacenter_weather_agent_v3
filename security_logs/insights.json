@@ -1,0 +1,8 @@
+{
+  "timestamp": "2026-01-31T20:46:33.253310",
+  "threat_distribution": {
+    "config_inspection": 5,
+    "security_bypass": 1
+  },
+  "total_violations": 6
+}
