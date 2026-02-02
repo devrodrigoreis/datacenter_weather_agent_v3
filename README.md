@@ -5,10 +5,10 @@ A production-grade multi-agent LangGraph system that provides secure, intelligen
 **Architecture**: LangGraph Multi-Agent Supervisor Pattern with 7 specialized agents, 3-tier memory system, and fine-tuned ML classifiers for cost-efficient inference.
 
 **Key Features**:
-- 🤖 **Fine-Tuned Classifiers**: Gemma 3 270M (security) + DistilBERT (intent) - saves LLM credits
-- 🧠 **Three-Tier Memory**: Context Management + SQLite Persistence + RAG Semantic Search
-- 🔒 **Multi-Layer Security**: Real-time threat detection with adaptive learning
-- ⚡ **Production Ready**: Python 3.13, MPS/CUDA support, graceful error handling
+-  **Fine-Tuned Classifiers**: Gemma 3 270M (security) + DistilBERT (intent) - saves LLM credits
+-  **Three-Tier Memory**: Context Management + SQLite Persistence + RAG Semantic Search
+-  **Multi-Layer Security**: Real-time threat detection with adaptive learning
+-  **Production Ready**: Python 3.13, MPS/CUDA support, graceful error handling
 
 ## Overview
 

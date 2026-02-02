@@ -1,7 +1,8 @@
 {
-  "timestamp": "2026-02-01T13:11:15.941390",
+  "timestamp": "2026-02-02T06:23:18.624656",
   "threat_distribution": {
-    "prompt_extraction": 1
+    "role_manipulation": 1,
+    "prompt_extraction": 2
   },
-  "total_violations": 1
+  "total_violations": 3
 }
